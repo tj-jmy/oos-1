@@ -50,7 +50,6 @@ void ProcessManager::SetupProcessZero()
 	u.u_MemoryDescriptor.m_DataStartAddress = 0;
 	u.u_MemoryDescriptor.m_DataSize = 0;
 	u.u_MemoryDescriptor.m_StackSize = 0;
-	u.u_MemoryDescriptor.m_UserPageTableArray = NULL;
 //	u.u_MemoryDescriptor.Initialize();
 }
 
@@ -85,16 +84,6 @@ int ProcessManager::NewProc()
 	设置过 */
 	SaveU(u.u_rsav);
 
-	/* 将父进程的用户态页表指针m_UserPageTableArray备份至pgTable */
-	PageTable* pgTable = u.u_MemoryDescriptor.m_UserPageTableArray;
-	u.u_MemoryDescriptor.Initialize();
-	/* 父进程的相对地址映照表拷贝给子进程，共两张页表的大小 */
-	if ( NULL != pgTable )
-	{
-		u.u_MemoryDescriptor.Initialize();
-		Utility::MemCopy((unsigned long)pgTable, (unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray, sizeof(PageTable) * MemoryDescriptor::USER_SPACE_PAGE_TABLE_CNT);
-	}
-
 	//将先运行进程的u区的u_procp指向new process
 	//这样可以在被复制的时候可以直接复制u_procp的
 	//地址，在内存不够时，是无法将u区映射到用户区，
@@ -127,11 +116,7 @@ int ProcessManager::NewProc()
 		}
 	}
 	u.u_procp = current;
-	/* 
-	 * 拷贝进程图像期间，父进程的m_UserPageTableArray指向子进程的相对地址映照表；
-	 * 复制完成后才能恢复为先前备份的pgTable。
-	 */
-	u.u_MemoryDescriptor.m_UserPageTableArray = pgTable;
+
 	//Diagnose::Write("End NewProc()\n");
 	return 0;
 }
