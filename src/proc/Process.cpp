@@ -286,7 +286,7 @@ void Process::Clone(Process& proc)
 	proc.p_textp = this->p_textp;
 	
 	/* 建立父子关系 */
-	proc.p_pid = ProcessManager::NextUniquePid();
+	// proc.p_pid = ProcessManager::NextUniquePid();
 	proc.p_ppid = this->p_pid;
 	
 	/* 初始化进程调度相关成员 */

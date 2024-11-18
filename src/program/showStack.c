@@ -3,19 +3,53 @@
 
 void main1()
 {
-    printf("getpid2: %d\n", getpid2());
-    printf("getppid: %x\n", getppid());
-}
-
-int sum(int var1, int var2) // 显式声明参数类型
-{
-    int count;
-    version = 2;
-    count = var1 + var2;
-
-    // printf("var1 address: %x\n", &var1);
-    // printf("var2 address: %x\n", &var2);
-    // printf("count address: %x\n", &count);
-
-    return (count);
+    int i;
+    while ((i = fork()) == -1)
+        ;
+    if (i)
+    {
+        while ((i = fork()) == -1)
+            ;
+        if (i)
+        {
+            printf("Parent, pid = %d\n", getpid());
+        }
+        else
+        {
+            printf("2nd Child, pid = %d\n", getpid());
+            exit(0);
+        }
+    }
+    else
+    {
+        printf("1st Child, pid = %d\n", getpid());
+        exit(0);
+    }
+    while (wait(0) != -1)
+        ;
+    while ((i = fork()) == -1)
+        ;
+    if (i)
+    {
+        while ((i = fork()) == -1)
+            ;
+        if (i)
+        {
+            printf("Parent, pid = %d\n", getpid());
+        }
+        else
+        {
+            printf("4th Child, pid = %d\n", getpid());
+            exit(0);
+        }
+    }
+    else
+    {
+        printf("3rd Child, pid = %d\n", getpid());
+        exit(0);
+    }
+    while (wait(0) != -1)
+        ;
+    printf("Parent end\n");
+    exit(0);
 }
