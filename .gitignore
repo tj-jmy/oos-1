@@ -1,0 +1,7 @@
+*.*
+!*.cpp
+!*.c
+!*.h
+!*.hpp
+!*.gitignore
+tools/
