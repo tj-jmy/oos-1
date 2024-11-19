@@ -336,8 +336,8 @@ void ProcessManager::Wait()
 	int i;
 	bool hasChild = false;
 	User &u = Kernel::Instance().GetUser();
-	SwapperManager &swapperMgr = Kernel::Instance().GetSwapperManager();
-	BufferManager &bufMgr = Kernel::Instance().GetBufferManager();
+	// SwapperManager &swapperMgr = Kernel::Instance().GetSwapperManager();
+	// BufferManager &bufMgr = Kernel::Instance().GetBufferManager();
 
 	Diagnose::Write("Process %d finding dead son. They are ", u.u_procp->p_pid);
 	while (true)
@@ -360,21 +360,28 @@ void ProcessManager::Wait()
 					process[i].p_sig = 0;
 					process[i].p_flag = 0;
 
-					/* 读入swapper中子进程u结构副本 */
-					Buf *pBuf = bufMgr.Bread(DeviceManager::ROOTDEV, process[i].p_addr);
-					swapperMgr.FreeSwap(BufferManager::BUFFER_SIZE, process[i].p_addr);
-					User *pUser = (User *)pBuf->b_addr;
+					// /* 读入swapper中子进程u结构副本 */
+					// Buf *pBuf = bufMgr.Bread(DeviceManager::ROOTDEV, process[i].p_addr);
+					// swapperMgr.FreeSwap(BufferManager::BUFFER_SIZE, process[i].p_addr);
+					// User *pUser = (User *)pBuf->b_addr;
 
-					/* 把子进程的时间加到父进程上 */
-					u.u_cstime += pUser->u_cstime + pUser->u_stime;
-					u.u_cutime += pUser->u_cutime + pUser->u_utime;
+					// /* 把子进程的时间加到父进程上 */
+					// u.u_cstime += pUser->u_cstime + pUser->u_stime;
+					// u.u_cutime += pUser->u_cutime + pUser->u_utime;
+					u.u_cstime += process[i].p_stime;
+					u.u_cutime += process[i].p_utime;
 
 					int *pInt = (int *)u.u_arg[0];
 					/* 获取子进程exit(int status)的返回值 */
-					*pInt = pUser->u_arg[0];
+					// *pInt = pUser->u_arg[0];
+					*pInt = process[i].p_exitcode;
+
+					process[i].p_utime = 0;
+					process[i].p_stime = 0;
+					process[i].p_exitcode = 0;
 
 					/* 如果此处没有Brelse()系统会发生什么-_- */
-					bufMgr.Brelse(pBuf);
+					// bufMgr.Brelse(pBuf);
 					Diagnose::Write("end wait\n");
 					return;
 				}
