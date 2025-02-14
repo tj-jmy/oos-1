@@ -58,11 +58,28 @@
 						 :                      \
 						 : "m"(u_sav[0]), "m"(u_sav[1]));
 
+class ProcessList
+{
+public:
+	static const int nodeSize = 10 * sizeof(Process);
+	Process *node;
+	ProcessList *next;
+
+	Process &operator[](int i);
+
+	ProcessList();
+	~ProcessList();
+	void Initialize();
+	void Expand();
+};
+
 class ProcessManager
 {
 	/* static consts */
 public:
-	static const int NPROC = 8;
+	static const int PROCESS_LIST_SIZE = 10; /* 进程列表大小 */
+	static int NPROC;						 // 系统中进程数
+
 	static const unsigned long PROCESS_ZERO_PPDA_ADDRESS = 0x400000 - 0x1000;
 
 	static const int NTEXT = 50;
@@ -162,7 +179,7 @@ public:
 
 	/* Members */
 public:
-	Process process[NPROC];
+	ProcessList process;
 	Text text[NTEXT];
 
 	int CurPri;	  /* 现运行占用CPU时优先数 */

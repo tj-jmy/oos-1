@@ -36,6 +36,8 @@ public:
 	 * MapToPageTable()函数将相对地址映射表加载到用户态页表中。
 	 */
 	bool EstablishUserPageTable(unsigned long textVirtualAddress, unsigned long textSize, unsigned long dataVirtualAddress, unsigned long dataSize, unsigned long stackSize);
+	void ClearUserPageTable();
+	PageTable *GetUserPageTableArray();
 	unsigned long GetTextStartAddress();
 	unsigned long GetTextSize();
 	unsigned long GetDataStartAddress();
@@ -53,6 +55,7 @@ private:
 	unsigned int MemoryDescriptor::MapEntry(unsigned long virtualAddress, unsigned int size, unsigned long phyPageIdx, bool isReadWrite);
 
 public:
+	PageTable *m_UserPageTableArray;
 	/* 以下数据都是线性地址 */
 	unsigned long m_TextStartAddress; /* 代码段起始地址 */
 	unsigned long m_TextSize;		  /* 代码段长度 */

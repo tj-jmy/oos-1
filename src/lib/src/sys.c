@@ -202,11 +202,13 @@ int getpid2()
 	return -1;
 }
 
-int getppid()
+int getppda(unsigned int *args)
 {
 	int res;
-	__asm__ volatile("int $0x80" : "=a"(res) : "a"(51));
+	__asm__ volatile("int $0x80" : "=a"(res) : "a"(51), "b"(args));
 	if (res >= 0)
+	{
 		return res;
+	}
 	return -1;
 }

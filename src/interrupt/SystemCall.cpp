@@ -5,6 +5,7 @@
 #include "TimeInterrupt.h"
 #include "CRT.h"
 #include "Video.h"
+#include "Machine.h"
 
 /* 系统调用入口表的定义
  * 参照UNIX V6中sysent.c中对系统调用入口表sysent的定义 @line 2910
@@ -62,7 +63,7 @@ SystemCallTableEntry SystemCall::m_SystemEntranceTable[SYSTEM_CALL_NUM] =
 		{2, &Sys_Ssig},			  /* 48 = sig	*/
 		{0, &Sys_Nosys},		  /* 49 = nosys	*/
 		{0, &Sys_Getpid2},		  /* 50 = nosys	*/
-		{0, &Sys_getppid},		  /* 51 = nosys	*/
+		{1, &Sys_getppda},		  /* 51 = nosys	*/
 		{0, &Sys_Nosys},		  /* 52 = nosys	*/
 		{0, &Sys_Nosys},		  /* 53 = nosys	*/
 		{0, &Sys_Nosys},		  /* 54 = nosys	*/
@@ -730,11 +731,20 @@ int SystemCall::Sys_Getpid2()
 	return 0; /* GCC likes it ! */
 }
 
-/*	51 = getppid	count = 0	*/
-int SystemCall::Sys_getppid()
+/*	51 = getppda	count = 0	*/
+int SystemCall::Sys_getppda()
 {
 	User &u = Kernel::Instance().GetUser();
-	u.u_ar0[User::EAX] = u.u_procp->p_ppid;
+	unsigned int ppda_phy_addr = u.u_procp->p_addr;
+	unsigned int ppda_vir_addr = (unsigned int)&u;
+	unsigned int text_phy_addr = (unsigned int)u.u_procp->p_textp->x_caddr;
+	unsigned int text_vir_addr = 0x00410000;
+
+	unsigned int *args = (unsigned int *)u.u_arg[0];
+	args[0] = ppda_phy_addr;
+	args[1] = ppda_vir_addr;
+	args[2] = text_phy_addr;
+	args[3] = text_vir_addr;
 
 	return 0; /* GCC likes it ! */
 }

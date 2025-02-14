@@ -146,6 +146,7 @@ void Process::Expand(unsigned int newSize)
 
 	/* 进程图像扩大，需要寻找一块大小newSize的连续内存区 */
 	SaveU(u.u_rsav);
+	unsigned int changeSize = newSize - oldSize;
 	newAddress = userPgMgr.AllocMemory(newSize);
 	/* 分配内存失败，将进程暂时换出到交换区上 */
 	if (NULL == newAddress)
@@ -329,10 +330,16 @@ void Process::SStack()
 	md.m_StackSize += change;
 	unsigned int newSize = ProcessManager::USIZE + md.m_DataSize + md.m_StackSize;
 
-	if (false == u.u_MemoryDescriptor.EstablishUserPageTable(md.m_TextStartAddress,
-															 md.m_TextSize, md.m_DataStartAddress, md.m_DataSize, md.m_StackSize))
+	// if (false == u.u_MemoryDescriptor.EstablishUserPageTable(md.m_TextStartAddress,
+	// 														 md.m_TextSize, md.m_DataStartAddress, md.m_DataSize, md.m_StackSize))
+	// {
+	// 	u.u_error = User::ENOMEM;
+	// 	return;
+	// }
+	if (md.m_TextSize + md.m_DataSize + md.m_StackSize + PageManager::PAGE_SIZE > MemoryDescriptor::USER_SPACE_SIZE - md.m_TextStartAddress)
 	{
 		u.u_error = User::ENOMEM;
+		Diagnose::Write("u.u_error = %d\n", u.u_error);
 		return;
 	}
 

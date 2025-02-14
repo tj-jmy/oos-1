@@ -223,7 +223,7 @@ private:
 	/*	49 ~ 63 = nosys	count = 0	*/
 	static int Sys_Getpid2();
 
-	static int Sys_getppid();
+	static int Sys_getppda();
 
 private:
 	/*系统调用入口表的声明*/

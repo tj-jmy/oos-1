@@ -10,6 +10,64 @@
 
 unsigned int ProcessManager::m_NextUniquePid = 0;
 
+int ProcessManager::NPROC = ProcessManager::PROCESS_LIST_SIZE;
+
+ProcessList::ProcessList()
+{
+	node = 0;
+	next = 0;
+}
+
+ProcessList::~ProcessList()
+{
+	KernelAllocator &kernelAllocator = Kernel::Instance().GetKernelAllocator();
+	kernelAllocator.FreeMemeory(ProcessList::nodeSize, (unsigned long)node);
+	while (next)
+	{
+		ProcessList *tmp = next;
+		next = next->next;
+		kernelAllocator.FreeMemeory(ProcessList::nodeSize, (unsigned long)tmp->node);
+	}
+}
+
+void ProcessList::Initialize()
+{
+	KernelAllocator &kernelAllocator = Kernel::Instance().GetKernelAllocator();
+	node = (Process *)kernelAllocator.AllocMemory(ProcessList::nodeSize);
+	if (!node)
+	{
+		Utility::Panic("No Memory!");
+	}
+	for (int i = 0; i < ProcessManager::PROCESS_LIST_SIZE; i++)
+	{
+		node[i].p_stat = Process::SNULL;
+		node[i].p_ppid = -1;
+	}
+}
+
+void ProcessList::Expand()
+{
+	ProcessList *newList = new ProcessList();
+	newList->Initialize();
+	ProcessList *tmp = this;
+	while (tmp->next)
+	{
+		tmp = tmp->next;
+	}
+	tmp->next = newList;
+}
+
+Process &ProcessList::operator[](int i)
+{
+	int j = i / ProcessManager::PROCESS_LIST_SIZE;
+	ProcessList *tmp = this;
+	while (j--)
+	{
+		tmp = tmp->next;
+	}
+	return tmp->node[i % ProcessManager::PROCESS_LIST_SIZE];
+}
+
 ProcessManager::ProcessManager()
 {
 	CurPri = 0;
@@ -18,6 +76,7 @@ ProcessManager::ProcessManager()
 	RunOut = 0;
 	ExeCnt = 0;
 	SwtchNum = 0;
+	NPROC = PROCESS_LIST_SIZE;
 }
 
 ProcessManager::~ProcessManager()
@@ -27,6 +86,7 @@ ProcessManager::~ProcessManager()
 void ProcessManager::Initialize()
 {
 	// nothing to do here
+	process.Initialize();
 }
 
 void ProcessManager::SetupProcessZero()
@@ -50,6 +110,7 @@ void ProcessManager::SetupProcessZero()
 	u.u_MemoryDescriptor.m_DataStartAddress = 0;
 	u.u_MemoryDescriptor.m_DataSize = 0;
 	u.u_MemoryDescriptor.m_StackSize = 0;
+	u.u_MemoryDescriptor.m_UserPageTableArray = NULL;
 	//	u.u_MemoryDescriptor.Initialize();
 }
 
@@ -62,7 +123,14 @@ int ProcessManager::NewProc()
 {
 	// Diagnose::Write("Start NewProc()\n");
 	Process *child = 0;
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+
+	if (process[NPROC - 2].p_stat != Process::SNULL)
+	{
+		process.Expand();
+		NPROC += PROCESS_LIST_SIZE;
+	}
+
+	for (int i = 0; i < NPROC; i++)
 	{
 		if (process[i].p_stat == Process::SNULL)
 		{
@@ -84,6 +152,16 @@ int ProcessManager::NewProc()
 	/* 这里必须先要调用SaveU()保存现场到u区，因为有些进程并不一定
 	设置过 */
 	SaveU(u.u_rsav);
+
+	/* 将父进程的用户态页表指针m_UserPageTableArray备份至pgTable */
+	PageTable *pgTable = u.u_MemoryDescriptor.m_UserPageTableArray;
+	u.u_MemoryDescriptor.Initialize();
+	/* 父进程的相对地址映照表拷贝给子进程，共两张页表的大小 */
+	if (NULL != pgTable)
+	{
+		u.u_MemoryDescriptor.Initialize();
+		Utility::MemCopy((unsigned long)pgTable, (unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray, sizeof(PageTable) * MemoryDescriptor::USER_SPACE_PAGE_TABLE_CNT);
+	}
 
 	// 将先运行进程的u区的u_procp指向new process
 	// 这样可以在被复制的时候可以直接复制u_procp的
@@ -111,13 +189,54 @@ int ProcessManager::NewProc()
 	{
 		int n = current->p_size;
 		child->p_addr = desAddress;
-		while (n--)
+		PageTable *childPageTable = u.u_MemoryDescriptor.m_UserPageTableArray;
+		// 复制父进程的进程图像
+		unsigned int phyPageIndex = 1 + (desAddress >> 12);
+		unsigned long i;
+		unsigned long j;
+		for (i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
+		{
+			for (j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
+			{
+				if (childPageTable[i].m_Entrys[j].m_Present && childPageTable[i].m_Entrys[j].m_ReadWriter)
+				{
+					childPageTable[i].m_Entrys[j].m_PageBaseAddress = phyPageIndex++;
+				}
+			}
+		}
+		// // 复制父进程的内存图像
+		// while (n--)
+		// {
+		// 	Utility::CopySeg(srcAddress++, desAddress++);
+		// }
+		// PPDA区
+		for (int i = 0; i < 0x1000; i++)
 		{
 			Utility::CopySeg(srcAddress++, desAddress++);
 		}
+		// 数据区
+		for (i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
+		{
+			for (j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
+			{
+				if (childPageTable[i].m_Entrys[j].m_Present && childPageTable[i].m_Entrys[j].m_ReadWriter)
+				{
+					unsigned long src = pgTable[i].m_Entrys[j].m_PageBaseAddress << 12;
+					unsigned long des = (childPageTable[i].m_Entrys[j].m_PageBaseAddress << 12);
+					for (unsigned int k = 0; k < PageManager::PAGE_SIZE; k++)
+					{
+						Utility::CopySeg(src++, des++);
+					}
+				}
+			}
+		}
 	}
 	u.u_procp = current;
-
+	/*
+	 * 拷贝进程图像期间，父进程的m_UserPageTableArray指向子进程的相对地址映照表；
+	 * 复制完成后才能恢复为先前备份的pgTable。
+	 */
+	u.u_MemoryDescriptor.m_UserPageTableArray = pgTable;
 	// Diagnose::Write("End NewProc()\n");
 	return 0;
 }
@@ -210,7 +329,7 @@ sloop:
 loop:
 	X86Assembly::CLI();
 	seconds = -1;
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+	for (int i = 0; i < NPROC; i++)
 	{
 		if (this->process[i].p_stat == Process::SRUN && (this->process[i].p_flag & Process::SLOAD) == 0 && this->process[i].p_time > seconds)
 		{
@@ -252,7 +371,7 @@ loop:
 	 * 暂停状态(SSTOP)-->高优先权睡眠状态(SSLEEP)-->就绪状态(SRUN)进程换出。
 	 */
 	X86Assembly::CLI();
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+	for (int i = 0; i < NPROC; i++)
 	{
 		if (this->process[i].p_flag & (Process::SSYS | Process::SLOCK | Process::SLOAD) == Process::SLOAD && (this->process[i].p_stat == Process::SWAIT || this->process[i].p_stat == Process::SSTOP))
 		{
@@ -270,7 +389,7 @@ loop:
 	}
 
 	seconds = -1;
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+	for (int i = 0; i < NPROC; i++)
 	{
 		if (this->process[i].p_flag & (Process::SSYS | Process::SLOCK | Process::SLOAD) == Process::SLOAD && (this->process[i].p_stat == Process::SWAIT || this->process[i].p_stat == Process::SSTOP) && pSelected->p_time > seconds)
 		{
@@ -411,7 +530,7 @@ void ProcessManager::Fork()
 	;
 
 	/* 寻找空闲的process项，作为子进程的进程控制块 */
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+	for (int i = 0; i < NPROC; i++)
 	{
 		if (this->process[i].p_stat == Process::SNULL)
 		{
@@ -754,7 +873,7 @@ void ProcessManager::Kill()
 	int signal = u.u_arg[1];
 	bool flag = false;
 
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+	for (int i = 0; i < NPROC; i++)
 	{
 		/* 不允许发送信号给进程自身 */
 		if (u.u_procp == &process[i])
@@ -789,7 +908,7 @@ void ProcessManager::Kill()
 void ProcessManager::WakeUpAll(unsigned long chan)
 {
 	/* 唤醒系统中所有因chan而进入睡眠的进程 */
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+	for (int i = 0; i < NPROC; i++)
 	{
 		if (this->process[i].IsSleepOn(chan))
 		{
@@ -841,7 +960,7 @@ void ProcessManager::XSwap(Process *pProcess, bool bFreeMemory, int size)
 
 void ProcessManager::Signal(TTy *pTTy, int signal)
 {
-	for (int i = 0; i < ProcessManager::NPROC; i++)
+	for (int i = 0; i < NPROC; i++)
 	{
 		if (this->process[i].p_ttyp == pTTy)
 		{
