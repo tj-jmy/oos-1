@@ -9,6 +9,11 @@ PageManager::PageManager(Allocator *allocator)
 	this->m_pAllocator = allocator;
 }
 
+unsigned int *PageManager::GetPageRefCnt()
+{
+	return this->m_PageRefCnt;
+}
+
 int PageManager::Initialize()
 {
 	// for (unsigned int i = 0; i < MEMORY_MAP_ARRAY_SIZE; i++)
@@ -35,11 +40,10 @@ unsigned long PageManager::AllocMemory(unsigned long size)
 	}
 
 	unsigned long required_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+	unsigned long startPageIndex = 0;
+	unsigned long count = 0; // 连续空闲页计数
 
-	unsigned long startPageIndex = 0; // 起始页索引
-	unsigned long count = 0;		  // 连续空闲页计数
-
-	for (unsigned long i = 0; i < TOTAL_PAGES; ++i)
+	for (unsigned long i = m_StartAddressIdx; i < m_StartAddressIdx + m_Size; ++i)
 	{
 		if (!bit_is_set(i))
 		{
@@ -48,11 +52,15 @@ unsigned long PageManager::AllocMemory(unsigned long size)
 			count++;
 			if (count == required_pages)
 			{
+				// Diagnose::Write("AllocMemory: startPageIndex = %d, required_pages = %d\n", startPageIndex, required_pages);
 				// 找到足够页，设置为占用
 				for (unsigned long j = startPageIndex; j < startPageIndex + required_pages; ++j)
+				{
 					set_bit(j);
+					this->m_PageRefCnt[j] = 1;
+				}
 				// 计算分配的物理地址
-				return (m_StartAddressIdx + startPageIndex) * PAGE_SIZE;
+				return startPageIndex * PAGE_SIZE;
 			}
 		}
 		else
@@ -74,6 +82,7 @@ unsigned long PageManager::FreeMemory(unsigned long size, unsigned long startAdd
 	for (unsigned long i = startIdx; i < startIdx + count; i++)
 	{
 		clear_bit(i);
+		this->m_PageRefCnt[i] = 0;
 	}
 
 	return 0;

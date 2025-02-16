@@ -43,6 +43,8 @@ public:
 	 */
 	unsigned long FreeMemory(unsigned long size, unsigned long memoryStartAddress);
 
+	unsigned int *GetPageRefCnt();
+
 private:
 	PageManager();
 

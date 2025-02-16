@@ -70,7 +70,7 @@ public:
 	ProcessList();
 	~ProcessList();
 	void Initialize();
-	void Expand();
+	void expand();
 };
 
 class ProcessManager

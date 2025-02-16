@@ -159,10 +159,6 @@ void MemoryDescriptor::MapToPageTable()
 
 	PageDirectory *pUserPageDirectory = &Machine::Instance().GetPageDirectory();
 
-	unsigned long phyFrame = ((unsigned long)this->m_UserPageTableArray - Machine::KERNEL_SPACE_START_ADDRESS) >> 12;
-
-	Diagnose::Write("phyFrame = %x\n", phyFrame);
-
 	pUserPageDirectory->m_Entrys[1].m_Present = 1;
 	pUserPageDirectory->m_Entrys[1].m_ReadWriter = 1;
 	pUserPageDirectory->m_Entrys[1].m_PageTableBaseAddress = phyFrame + 1;

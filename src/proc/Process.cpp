@@ -230,10 +230,34 @@ void Process::Exit()
 	// bufMgr.Bwrite(pBuf);
 
 	/* 释放内存资源 */
-	u.u_MemoryDescriptor.Release();
+	// u.u_MemoryDescriptor.Release();
 	Process *current = u.u_procp;
 	UserPageManager &userPageMgr = Kernel::Instance().GetUserPageManager();
-	userPageMgr.FreeMemory(current->p_size, current->p_addr);
+	// userPageMgr.FreeMemory(current->p_size, current->p_addr);
+
+	PageTable *pgTable = u.u_MemoryDescriptor.m_UserPageTableArray;
+	unsigned int *pageRefCnt = userPageMgr.GetPageRefCnt();
+	for (unsigned int i = 1; i < Machine::USER_PAGE_TABLE_CNT; i++)
+	{
+		for (unsigned int j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
+		{
+			if (pgTable[i].m_Entrys[j].m_Present)
+			{
+				unsigned int base = pgTable[i].m_Entrys[j].m_PageBaseAddress;
+				if (pgTable[i].m_Entrys[j].m_ReadWriter && pageRefCnt[base] == 1) // 如果引用计数为1，说明只有一个进程在使用这个页面，可以直接释放
+				{
+					userPageMgr.FreeMemory(PageManager::PAGE_SIZE, base << 12);
+				}
+				else if (pageRefCnt[base] > 1) // 如果引用计数大于1，说明有多个进程在使用这个页面，需要减少引用计数
+				{
+					pageRefCnt[base]--;
+				}
+			}
+		}
+	}
+
+	u.u_MemoryDescriptor.Release();
+
 	// current->p_addr = blkno;
 	current->p_stat = Process::SZOMB;
 	current->p_exitcode = u.u_arg[0];

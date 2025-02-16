@@ -45,7 +45,7 @@ void ProcessList::Initialize()
 	}
 }
 
-void ProcessList::Expand()
+void ProcessList::expand()
 {
 	ProcessList *newList = new ProcessList();
 	newList->Initialize();
@@ -55,6 +55,7 @@ void ProcessList::Expand()
 		tmp = tmp->next;
 	}
 	tmp->next = newList;
+	ProcessManager::NPROC += ProcessManager::PROCESS_LIST_SIZE;
 }
 
 Process &ProcessList::operator[](int i)
@@ -126,8 +127,7 @@ int ProcessManager::NewProc()
 
 	if (process[NPROC - 2].p_stat != Process::SNULL)
 	{
-		process.Expand();
-		NPROC += PROCESS_LIST_SIZE;
+		process.expand();
 	}
 
 	for (int i = 0; i < NPROC; i++)
@@ -162,6 +162,27 @@ int ProcessManager::NewProc()
 		u.u_MemoryDescriptor.Initialize();
 		Utility::MemCopy((unsigned long)pgTable, (unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray, sizeof(PageTable) * MemoryDescriptor::USER_SPACE_PAGE_TABLE_CNT);
 	}
+	// COW，遍历父进程的 1#用户页表，
+	// 将属性为 RO 的 PTE 复制给子进程。
+	// 对每个属性为 RW 的 PTE，
+	// （1）读取其中的物理页框号 base，Page[base]++；
+	// （2）将属性 RW 改成 RO，复制给子进程。
+	PageTable *childPgTable = u.u_MemoryDescriptor.m_UserPageTableArray;
+	UserPageManager &userPageManager = Kernel::Instance().GetUserPageManager();
+	unsigned int *pageRefCnt = userPageManager.GetPageRefCnt();
+
+	for (unsigned int i = 1; i < Machine::USER_PAGE_TABLE_CNT; i++)
+	{
+		for (unsigned int j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
+		{
+			if (childPgTable[i].m_Entrys[j].m_Present && childPgTable[i].m_Entrys[j].m_ReadWriter)
+			{
+				pageRefCnt[childPgTable[i].m_Entrys[j].m_PageBaseAddress]++;
+				pgTable[i].m_Entrys[j].m_ReadWriter = 0;
+				childPgTable[i].m_Entrys[j].m_ReadWriter = 0;
+			}
+		}
+	}
 
 	// 将先运行进程的u区的u_procp指向new process
 	// 这样可以在被复制的时候可以直接复制u_procp的
@@ -169,10 +190,10 @@ int ProcessManager::NewProc()
 	// 修改u_procp的地址的
 	u.u_procp = child;
 
-	UserPageManager &userPageManager = Kernel::Instance().GetUserPageManager();
+	// UserPageManager &userPageManager = Kernel::Instance().GetUserPageManager();
 
 	unsigned long srcAddress = current->p_addr;
-	unsigned long desAddress = userPageManager.AllocMemory(current->p_size);
+	unsigned long desAddress = userPageManager.AllocMemory(PageManager::PAGE_SIZE);
 	// Diagnose::Write("srcAddress %x\n", srcAddress);
 	// Diagnose::Write("desAddress %x\n", desAddress);
 	if (desAddress == 0) /* 内存不够，需要swap */
@@ -189,28 +210,8 @@ int ProcessManager::NewProc()
 	{
 		int n = current->p_size;
 		child->p_addr = desAddress;
-		PageTable *childPageTable = u.u_MemoryDescriptor.m_UserPageTableArray;
-		// 复制父进程的进程图像
-		unsigned int phyPageIndex = 1 + (desAddress >> 12);
-		unsigned long i;
-		unsigned long j;
-		for (i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
-		{
-			for (j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
-			{
-				if (childPageTable[i].m_Entrys[j].m_Present && childPageTable[i].m_Entrys[j].m_ReadWriter)
-				{
-					childPageTable[i].m_Entrys[j].m_PageBaseAddress = phyPageIndex++;
-				}
-			}
-		}
-		// // 复制父进程的内存图像
-		// while (n--)
-		// {
-		// 	Utility::CopySeg(srcAddress++, desAddress++);
-		// }
 		// PPDA区
-		for (int i = 0; i < 0x1000; i++)
+		for (int i = 0; i < PageManager::PAGE_SIZE; i++)
 		{
 			Utility::CopySeg(srcAddress++, desAddress++);
 		}
@@ -693,12 +694,40 @@ void ProcessManager::Exec()
 	Utility::MemCopy((unsigned long)&argc, desAddress, sizeof(int)); /* Done! */
 
 	/* 释放原进程图像的共享正文段，数据段，堆栈段 */
+	// 释放代码段。
+	// Text 结构，x_count--； 减至 0，释放代码段，具体而言，逐页执行以下操作：
 	if (u.u_procp->p_textp != NULL)
 	{
 		u.u_procp->p_textp->XFree();
 		u.u_procp->p_textp = NULL;
 	}
-	u.u_procp->Expand(ProcessManager::USIZE);
+	// u.u_procp->Expand(ProcessManager::USIZE);
+	// 释放数据段
+	// （1） 释放物理页框 base：Page[base] = 0，物理页框 base 写 4096 个字节的 0。
+	// （2） 清理页表项。PTE = 0。
+	PageTable *pgTable = u.u_MemoryDescriptor.m_UserPageTableArray;
+	unsigned int *pageRefCnt = userPgMgr.GetPageRefCnt();
+	for (unsigned int i = 1; i < Machine::USER_PAGE_TABLE_CNT; i++)
+	{
+		for (unsigned int j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
+		{
+			if (pgTable[i].m_Entrys[j].m_Present)
+			{
+				unsigned int base = pgTable[i].m_Entrys[j].m_PageBaseAddress;
+				if (pgTable[i].m_Entrys[j].m_ReadWriter && pageRefCnt[base] == 1) // 如果引用计数为1，说明只有一个进程在使用这个页面，可以直接释放
+				{
+					userPgMgr.FreeMemory(PageManager::PAGE_SIZE, base << 12);
+				}
+				else if (pageRefCnt[base] > 1) // 如果引用计数大于1，说明有多个进程在使用这个页面，需要减少引用计数
+				{
+					pageRefCnt[base]--;
+				}
+			}
+		}
+	}
+
+	u.u_procp->p_size = ProcessManager::USIZE;
+	u.u_MemoryDescriptor.ClearUserPageTable();
 
 	pText = NULL;
 	/* 分配一个空闲Text结构，或者和其它进程共享同一正文段 */
